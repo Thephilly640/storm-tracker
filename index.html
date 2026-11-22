@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
+<title>Decatur Storm Tracker</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+<style>
+  :root{--bg:#0b0f14;--card:#141b23;--card2:#1b2430;--line:#263241;--text:#e6edf3;--dim:#8b98a7;--accent:#4fc3f7;}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+  header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line)}
+  header h1{font-size:17px;margin:0;font-weight:700}
+  header .meta{font-size:12px;color:var(--dim);text-align:right}
+  button{font:inherit;color:var(--text);background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 10px;cursor:pointer}
+  button:active{transform:scale(.97)}
+  .banner{padding:12px 14px;font-weight:800;font-size:16px;text-transform:uppercase;letter-spacing:.5px;cursor:pointer}
+  .banner small{display:block;font-weight:500;text-transform:none;letter-spacing:0;font-size:13px;opacity:.9}
+  .b-tor{background:#ff00c8;color:#fff;animation:flash 1s steps(2) infinite}
+  .b-svr{background:#ff6d00;color:#000;animation:flash 1.4s steps(2) infinite}
+  .b-watch{background:#ffd600;color:#000}
+  @keyframes flash{50%{filter:brightness(1.6)}}
+  #map{height:52vh;min-height:300px;background:#000}
+  .radarbar{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--card);border-bottom:1px solid var(--line)}
+  .radarbar input{flex:1;accent-color:var(--accent)}
+  .radarbar .t{font-variant-numeric:tabular-nums;font-size:13px;min-width:92px;text-align:right;color:var(--dim)}
+  .tabs{display:flex;gap:6px;overflow-x:auto;padding:10px 14px;position:sticky;top:0;background:var(--bg);z-index:500;border-bottom:1px solid var(--line)}
+  .tabs button{white-space:nowrap;border-radius:999px;padding:6px 12px}
+  .tabs button.on{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+  .count{display:inline-block;min-width:18px;padding:0 5px;margin-left:4px;border-radius:9px;background:#ff1744;color:#fff;font-size:11px;text-align:center}
+  main{padding:12px 14px 40px;max-width:900px;margin:0 auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+  .alert{border-left:6px solid;cursor:pointer}
+  .alert h3{margin:0 0 4px;font-size:15px}
+  .dim{color:var(--dim);font-size:13px}
+  .row{display:flex;justify-content:space-between;gap:10px;align-items:center}
+  .big{font-size:44px;font-weight:700;line-height:1}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 14px;font-size:14px;margin-top:10px}
+  .hourly{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px}
+  .hr{flex:0 0 74px;background:var(--card2);border-radius:10px;padding:8px 6px;text-align:center;font-size:13px}
+  .hr b{display:block;font-size:17px;margin:3px 0}
+  .day{display:grid;grid-template-columns:90px 1fr auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line);cursor:pointer}
+  .day:last-child{border:0}
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600;margin:2px 4px 2px 0}
+  .risk{font-size:26px;font-weight:800;padding:10px 12px;border-radius:10px;text-align:center}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:2000;display:flex;align-items:flex-end;justify-content:center}
+  .modal .sheet{background:var(--card);width:100%;max-width:760px;max-height:85vh;overflow:auto;border-radius:16px 16px 0 0;padding:16px 16px calc(24px + env(safe-area-inset-bottom))}
+  .modal pre{white-space:pre-wrap;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace;background:var(--bg);padding:10px;border-radius:8px}
+  .err{color:#ff8a80;font-size:12px}
+  .leaflet-container{background:#000;font:inherit}
+  .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--card);color:var(--text)}
+  .legend{display:flex;height:8px;border-radius:4px;overflow:hidden;margin:0 14px 8px;opacity:.85}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const html = htm.bind(React.createElement);
+const {useState,useEffect,useRef,useCallback} = React;
+
+// ---------- config ----------
+const LAT = 40.8306, LON = -84.9291;        // Decatur, IN 46733
+const COUNTY_ZONE = 'INC001';               // Adams County, IN
+const COUNTY_SAME = '018001';
+const KIWX = [41.3589, -85.7000];           // North Webster NEXRAD
+const REFRESH_MS = 120000;
+const FRAMES = [55,50,45,40,35,30,25,20,15,10,5,0]; // minutes ago
+const CELL_RADIUS_MI = 100;
+
+// ---------- helpers ----------
+async function getJSON(url, nws){
+  const r = await fetch(url, nws ? {headers:{Accept:'application/geo+json'}} : {});
+  if(!r.ok) throw new Error(r.status + ' from ' + new URL(url).host);
+  return r.json();
+}
+const cToF = c => c==null ? null : Math.round(c*9/5+32);
+function toMph(q){ if(!q||q.value==null) return null; const u=q.unitCode||'';
+  if(u.includes('km_h')) return Math.round(q.value*0.621371);
+  if(u.includes('m_s')) return Math.round(q.value*2.23694);
+  return Math.round(q.value); }
+const fmtTime = d => new Date(d).toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+const fmtHour = d => new Date(d).toLocaleTimeString([], {hour:'numeric'});
+const compass = deg => ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round(((deg%360)+360)%360/22.5)%16];
+function haversineMi(a1,o1,a2,o2){ const R=3958.8,t=Math.PI/180; const dA=(a2-a1)*t,dO=(o2-o1)*t;
+  const h=Math.sin(dA/2)**2+Math.cos(a1*t)*Math.cos(a2*t)*Math.sin(dO/2)**2; return 2*R*Math.asin(Math.sqrt(h)); }
+function bearing(a1,o1,a2,o2){ const t=Math.PI/180; const y=Math.sin((o2-o1)*t)*Math.cos(a2*t);
+  const x=Math.cos(a1*t)*Math.sin(a2*t)-Math.sin(a1*t)*Math.cos(a2*t)*Math.cos((o2-o1)*t); return (Math.atan2(y,x)/t+360)%360; }
+
+const SEV = {Extreme:{c:'#d500f9',r:4}, Severe:{c:'#ff1744',r:3}, Moderate:{c:'#ff9100',r:2}, Minor:{c:'#ffd600',r:1}, Unknown:{c:'#90a4ae',r:0}};
+const sev = a => SEV[a.properties.severity] || SEV.Unknown;
+function alertColor(a){ const e=a.properties.event||'';
+  if(e==='Tornado Warning') return '#ff00c8';
+  if(e==='Severe Thunderstorm Warning') return '#ff6d00';
+  return sev(a).c; }
+function inAdams(a){ const p=a.properties, g=p.geocode||{};
+  return (g.SAME||[]).includes(COUNTY_SAME) || (g.UGC||[]).includes(COUNTY_ZONE) || /Adams,\s*IN/i.test(p.areaDesc||''); }
+
+const flagOn = v => v!=null && v!=='' && !/^(NONE|0|null)$/i.test(String(v).trim());
+function analyzeCell(f){
+  const p=f.properties||{}; const [lon,lat]=f.geometry.coordinates;
+  const dist=haversineMi(LAT,LON,lat,lon);
+  const brg=bearing(LAT,LON,lat,lon);
+  const mph=p.sknt!=null ? p.sknt*1.15078 : null;
+  const toward = p.drct!=null ? (Number(p.drct)+180)%360 : null;  // NEXRAD reports direction FROM
+  let status='Motion unknown', eta=null, cls='dim';
+  if(mph!=null && toward!=null){
+    if(mph<3){ status='Nearly stationary'; }
+    else{
+      const k=Math.cos(LAT*Math.PI/180);
+      const cx=(lon-LON)*69.17*k, cy=(lat-LAT)*69.0;
+      const vx=Math.sin(toward*Math.PI/180), vy=Math.cos(toward*Math.PI/180);
+      const along=-cx*vx-cy*vy, cross=Math.abs((-cx)*vy-(-cy)*vx);
+      if(along<=0){ status='Moving away'; }
+      else{
+        const mins=along/mph*60;
+        if(cross<=8){ eta=new Date(Date.now()+mins*60000); status=`Headed for Decatur, ETA ${fmtTime(eta)} (${Math.round(mins)} min)`; cls='hit'; }
+        else status=`Passes ~${Math.round(cross)} mi from town in ~${Math.round(mins)} min`;
+      }
+    }
+  }
+  const flags=[];
+  if(flagOn(p.tvs)) flags.push({t:'TVS (tornadic signature)',c:'#ff00c8'});
+  if(flagOn(p.meso)) flags.push({t:'Rotation: '+String(p.meso).trim(),c:'#d500f9'});
+  if(p.poh!=null && p.poh>=30) flags.push({t:`Hail ${p.poh}%`,c:'#00e5ff'});
+  if(p.posh!=null && p.posh>=30) flags.push({t:`Severe hail ${p.posh}%`,c:'#00b8d4'});
+  if(p.max_size!=null && p.max_size>0) flags.push({t:`Max hail ${p.max_size}"`,c:'#80deea'});
+  return {id:(p.nexrad||'')+'-'+(p.storm_id||Math.random()), p, lat, lon, dist, brg, mph, toward, status, eta, cls, flags};
+}
+
+const RISK = {TSTM:['General Thunder','#c1e9c1','#000'],MRGL:['Marginal (1/5)','#66a366','#000'],SLGT:['Slight (2/5)','#f6f67f','#000'],
+  ENH:['Enhanced (3/5)','#e6c27a','#000'],MDT:['Moderate (4/5)','#e67f7f','#000'],HIGH:['High (5/5)','#ff66ff','#000']};
+const DN_TO_CAT = {2:'TSTM',3:'MRGL',4:'SLGT',5:'ENH',6:'MDT',8:'HIGH'};
+
+let audioCtx=null;
+function beep(){ if(!audioCtx) return; const t=audioCtx.currentTime;
+  for(let i=0;i<6;i++){ const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+    o.type='square'; o.frequency.value = i%2 ? 960 : 720; g.gain.value=0.25;
+    o.connect(g); g.connect(audioCtx.destination); o.start(t+i*0.35); o.stop(t+i*0.35+0.3); } }
+
+// ---------- app ----------
+function App(){
+  const mapEl=useRef(null), mapRef=useRef(null), radarRef=useRef([]), alertLayer=useRef(null), cellLayer=useRef(null);
+  const zoneCache=useRef(new Map()), pointRef=useRef(null), seenWarn=useRef(new Set());
+  const [tab,setTab]=useState('alerts');
+  const [alerts,setAlerts]=useState([]);
+  const [obs,setObs]=useState(null);
+  const [hourly,setHourly]=useState([]);
+  const [daily,setDaily]=useState([]);
+  const [cells,setCells]=useState([]);
+  const [spc,setSpc]=useState(null);
+  const [errs,setErrs]=useState({});
+  const [updated,setUpdated]=useState(null);
+  const [nextAt,setNextAt]=useState(Date.now()+REFRESH_MS);
+  const [now,setNow]=useState(Date.now());
+  const [frame,setFrame]=useState(FRAMES.length-1);
+  const [playing,setPlaying]=useState(true);
+  const [radarBase,setRadarBase]=useState(null);
+  const [modal,setModal]=useState(null);
+  const [sound,setSound]=useState(false);
+
+  const setErr=(k,v)=>setErrs(e=>({...e,[k]:v}));
+
+  // map init
+  useEffect(()=>{
+    const map=L.map(mapEl.current,{zoomControl:true,attributionControl:true}).setView([LAT,LON],8);
+    mapRef.current=map;
+    map.createPane('radar').style.zIndex=350;
+    map.createPane('labels').style.zIndex=450; map.getPane('labels').style.pointerEvents='none';
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
+      {attribution:'&copy; OpenStreetMap &copy; CARTO | Radar: Iowa Environmental Mesonet | Data: NWS, SPC',maxZoom:12}).addTo(map);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',{pane:'labels',maxZoom:12}).addTo(map);
+    radarRef.current=FRAMES.map(m=>L.tileLayer(radarUrl(m,Date.now()),{pane:'radar',opacity:0,maxZoom:12,maxNativeZoom:10}).addTo(map));
+    alertLayer.current=L.layerGroup().addTo(map);
+    cellLayer.current=L.layerGroup().addTo(map);
+    L.circleMarker([LAT,LON],{radius:7,color:'#fff',weight:2,fillColor:'#4fc3f7',fillOpacity:1}).bindPopup('Decatur, IN 46733').addTo(map);
+    [10,25].forEach(r=>L.circle([LAT,LON],{radius:r*1609.34,color:'#4fc3f7',weight:1,opacity:.5,fill:false,dashArray:'4 6',interactive:false}).addTo(map));
+    L.marker(KIWX,{icon:L.divIcon({className:'',html:'<div style="font-size:11px;color:#8b98a7;white-space:nowrap">◉ KIWX</div>'})}).addTo(map);
+    return ()=>map.remove();
+  },[]);
+
+  function radarUrl(m,bust){
+    const layer = m===0 ? 'nexrad-n0q-900913' : `nexrad-n0q-900913-m${String(m).padStart(2,'0')}m`;
+    return `https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/${layer}/{z}/{x}/{y}.png?_=${Math.floor(bust/60000)}`;
+  }
+
+  // radar frame display
+  useEffect(()=>{ radarRef.current.forEach((l,i)=>l.setOpacity(i===frame?0.72:0)); },[frame]);
+  useEffect(()=>{
+    if(!playing) return;
+    const id=setTimeout(()=>setFrame(f=>(f+1)%FRAMES.length), frame===FRAMES.length-1?1600:550);
+    return ()=>clearTimeout(id);
+  },[playing,frame]);
+
+  // ---------- data loads ----------
+  const loadPoint=async()=>{
+    if(pointRef.current) return pointRef.current;
+    const p=await getJSON(`https://api.weather.gov/points/${LAT.toFixed(4)},${LON.toFixed(4)}`,true);
+    pointRef.current=p.properties; return p.properties;
+  };
+
+  async function loadAlerts(){
+    try{
+      const [a,b]=await Promise.allSettled([
+        getJSON(`https://api.weather.gov/alerts/active?point=${LAT},${LON}`,true),
+        getJSON(`https://api.weather.gov/alerts/active?zone=${COUNTY_ZONE}`,true)]);
+      if(a.status==='rejected' && b.status==='rejected') throw a.reason;
+      const byId=new Map();
+      [a,b].forEach(r=>r.status==='fulfilled' && (r.value.features||[]).forEach(f=>byId.set(f.id||f.properties.id,f)));
+      const list=[...byId.values()].sort((x,y)=>sev(y).r-sev(x).r || new Date(y.properties.sent)-new Date(x.properties.sent));
+      setAlerts(list); setErr('alerts',null);
+      drawAlerts(list);
+      // sound for new tornado/svr warnings in Adams
+      const warn=list.filter(x=>inAdams(x) && /^(Tornado|Severe Thunderstorm) Warning$/.test(x.properties.event));
+      warn.forEach(x=>{ if(!seenWarn.current.has(x.id)){ seenWarn.current.add(x.id); beep(); }});
+    }catch(e){ setErr('alerts',e.message); }
+  }
+
+  async function drawAlerts(list){
+    const g=alertLayer.current; if(!g) return; g.clearLayers();
+    for(const a of [...list].reverse()){
+      let geom=a.geometry;
+      const style={color:alertColor(a),weight:a.geometry?3:1.5,fillOpacity:a.geometry?0.18:0.08,dashArray:a.geometry?null:'5 5'};
+      if(geom){ L.geoJSON(geom,{style}).on('click',()=>setModal({type:'alert',a})).addTo(g); continue; }
+      const zones=(a.properties.affectedZones||[]).slice(0,10);
+      for(const z of zones){
+        try{
+          if(!zoneCache.current.has(z)) zoneCache.current.set(z,(await getJSON(z,true)).geometry);
+          const zg=zoneCache.current.get(z); if(zg) L.geoJSON(zg,{style}).on('click',()=>setModal({type:'alert',a})).addTo(g);
+        }catch(e){}
+      }
+    }
+  }
+
+  async function loadForecast(){
+    try{
+      const p=await loadPoint();
+      const [h,d,st]=await Promise.all([getJSON(p.forecastHourly,true),getJSON(p.forecast,true),getJSON(p.observationStations,true)]);
+      setHourly((h.properties.periods||[]).slice(0,24));
+      setDaily(d.properties.periods||[]);
+      const station=st.features && st.features[0];
+      if(station){
+        const o=await getJSON(station.id+'/observations/latest',true);
+        setObs({...o.properties, stationName:station.properties.name, stationId:station.properties.stationIdentifier});
+      }
+      setErr('forecast',null);
+    }catch(e){ setErr('forecast',e.message); }
+  }
+
+  async function loadCells(){
+    try{
+      const gj=await getJSON('https://mesonet.agron.iastate.edu/geojson/nexrad_attr.geojson');
+      const cutoff=Date.now()-30*60000;
+      const list=(gj.features||[]).filter(f=>f.geometry && f.geometry.coordinates)
+        .map(analyzeCell)
+        .filter(c=>c.dist<=CELL_RADIUS_MI && (!c.p.valid || new Date(c.p.valid).getTime()>cutoff))
+        .sort((a,b)=>(a.eta?0:1)-(b.eta?0:1) || (a.eta&&b.eta ? a.eta-b.eta : a.dist-b.dist));
+      setCells(list); setErr('cells',null); drawCells(list);
+    }catch(e){ setErr('cells',e.message); }
+  }
+
+  function drawCells(list){
+    const g=cellLayer.current; if(!g) return; g.clearLayers();
+    const k=Math.cos(LAT*Math.PI/180);
+    list.forEach(c=>{
+      const tor=c.flags.some(f=>/TVS/.test(f.t)), rot=c.flags.some(f=>/Rotation/.test(f.t));
+      const dbz=c.p.max_dbz||0;
+      const col= tor?'#ff00c8' : rot?'#d500f9' : dbz>=60?'#ff1744' : dbz>=50?'#ff9100' : '#ffd600';
+      if(c.mph && c.toward!=null && c.mph>=3){
+        const vx=Math.sin(c.toward*Math.PI/180), vy=Math.cos(c.toward*Math.PI/180);
+        const end=[c.lat+vy*c.mph/69.0, c.lon+vx*c.mph/(69.17*k)];   // 60-min projection
+        L.polyline([[c.lat,c.lon],end],{color:col,weight:2,dashArray:'6 5',opacity:.9,interactive:false}).addTo(g);
+      }
+      L.circleMarker([c.lat,c.lon],{radius:tor?9:6,color:'#000',weight:1.5,fillColor:col,fillOpacity:1})
+        .on('click',()=>setModal({type:'cell',c})).addTo(g);
+    });
+  }
+
+  async function loadSpc(){
+    const base='https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/MapServer/';
+    const q=l=>`${base}${l}/query?geometry=${LON},${LAT}&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&returnGeometry=false&f=json`;
+    try{
+      const [cat,tor,hail,wind]=await Promise.allSettled([1,3,5,7].map(l=>getJSON(q(l))));
+      if(cat.status==='rejected') throw cat.reason;
+      const pick=r=>{ if(r.status!=='fulfilled'||!r.value.features||!r.value.features.length) return null;
+        return r.value.features.map(f=>f.attributes).sort((a,b)=>(b.dn||0)-(a.dn||0))[0]; };
+      const c=pick(cat);
+      let code=c ? (String(c.label||'').toUpperCase() in RISK ? String(c.label).toUpperCase() : DN_TO_CAT[c.dn]) : null;
+      const prob=a=>a? (a.label2||a.label||(a.dn+'%')) : 'None';
+      setSpc({code, issue:c&&c.issue, valid:c&&c.valid, expire:c&&c.expire, tor:prob(pick(tor)), hail:prob(pick(hail)), wind:prob(pick(wind))});
+      setErr('spc',null);
+    }catch(e){
+      try{ // fallback: IEM
+        const j=await getJSON(`https://mesonet.agron.iastate.edu/json/spcoutlook.py?lat=${LAT}&lon=${LON}&last=1&day=1&cat=categorical`);
+        const o=(j.outlooks||[])[0]; setSpc({code:o?String(o.threshold).toUpperCase():null, issue:o&&o.utc_issue}); setErr('spc',null);
+      }catch(e2){ setErr('spc',e.message); }
+    }
+  }
+
+  async function loadRadarTime(){
+    try{
+      const j=await getJSON('https://mesonet.agron.iastate.edu/json/tms.json');
+      const s=(j.services||[]).find(s=>/n0q/i.test(s.id||''));
+      if(s && s.utc_valid){ setRadarBase(new Date(s.utc_valid).getTime()); return; }
+    }catch(e){}
+    const t=Date.now()-5*60000; setRadarBase(t-t%300000);
+  }
+
+  const refreshAll=useCallback(()=>{
+    const t=Date.now();
+    radarRef.current.forEach((l,i)=>l.setUrl(radarUrl(FRAMES[i],t)));
+    Promise.allSettled([loadAlerts(),loadForecast(),loadCells(),loadSpc(),loadRadarTime()]).then(()=>setUpdated(Date.now()));
+    setNextAt(Date.now()+REFRESH_MS);
+  },[]);
+
+  useEffect(()=>{ refreshAll(); const id=setInterval(refreshAll,REFRESH_MS); return ()=>clearInterval(id); },[refreshAll]);
+  useEffect(()=>{ const id=setInterval(()=>setNow(Date.now()),1000); return ()=>clearInterval(id); },[]);
+
+  function toggleSound(){
+    try{ if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)(); audioCtx.resume(); }catch(e){}
+    setSound(s=>{ const n=!s; if(n) beep(); else if(audioCtx) audioCtx.suspend(); return n; });
+  }
+
+  // ---------- derived ----------
+  const adamsWarn=alerts.filter(a=>inAdams(a) && /^(Tornado|Severe Thunderstorm) Warning$/.test(a.properties.event));
+  const torWarn=adamsWarn.filter(a=>a.properties.event==='Tornado Warning');
+  const svrWarn=adamsWarn.filter(a=>a.properties.event==='Severe Thunderstorm Warning');
+  const watches=alerts.filter(a=>inAdams(a) && /Watch$/.test(a.properties.event) && /(Tornado|Severe Thunderstorm)/.test(a.properties.event));
+  const frameTime = radarBase ? radarBase - FRAMES[frame]*60000 : null;
+  const secsLeft=Math.max(0,Math.round((nextAt-now)/1000));
+  const incoming=cells.filter(c=>c.eta);
+
+  // ---------- render pieces ----------
+  const Banner=()=>html`<div>
+    ${torWarn.map(a=>html`<div key=${a.id} className="banner b-tor" onClick=${()=>setModal({type:'alert',a})}>
+      ⚠ ${/TORNADO EMERGENCY/i.test(a.properties.description||'')?'TORNADO EMERGENCY':'Tornado Warning'}: Adams County
+      <small>Until ${fmtTime(a.properties.ends||a.properties.expires)}. Take shelter now. Tap for details.</small></div>`)}
+    ${svrWarn.map(a=>html`<div key=${a.id} className="banner b-svr" onClick=${()=>setModal({type:'alert',a})}>
+      ⚠ Severe Thunderstorm Warning: Adams County
+      <small>Until ${fmtTime(a.properties.ends||a.properties.expires)}. ${a.properties.parameters?.maxHailSize?'Hail '+a.properties.parameters.maxHailSize[0]+'" ':''}${a.properties.parameters?.maxWindGust?'Wind '+a.properties.parameters.maxWindGust[0]:''} Tap for details.</small></div>`)}
+    ${!adamsWarn.length && watches.map(a=>html`<div key=${a.id} className="banner b-watch" onClick=${()=>setModal({type:'alert',a})}>
+      ${a.properties.event}: Adams County<small>Until ${fmtTime(a.properties.ends||a.properties.expires)}</small></div>`)}
+  </div>`;
+
+  const AlertsTab=()=>html`<div>
+    ${errs.alerts && html`<div className="err">Alerts: ${errs.alerts}</div>`}
+    ${!alerts.length && !errs.alerts && html`<div className="card"><b>No active alerts</b><div className="dim">for Decatur / Adams County</div></div>`}
+    ${alerts.map(a=>{const p=a.properties; return html`<div key=${a.id} className="card alert" style=${{borderLeftColor:alertColor(a)}} onClick=${()=>setModal({type:'alert',a})}>
+      <div className="row"><h3>${p.event}</h3><span className="pill" style=${{background:sev(a).c,color:'#000'}}>${p.severity}</span></div>
+      <div className="dim">${p.headline||''}</div>
+      <div className="dim">Until ${fmtTime(p.ends||p.expires)} · ${p.senderName||''}</div></div>`;})}
+  </div>`;
+
+  const CellsTab=()=>html`<div>
+    ${errs.cells && html`<div className="err">Storm cells: ${errs.cells}</div>`}
+    ${incoming.length>0 && html`<div className="card" style=${{borderColor:'#ff9100'}}><b>${incoming.length} cell${incoming.length>1?'s':''} headed for Decatur</b>
+      <div className="dim">Soonest: ${fmtTime(incoming[0].eta)}</div></div>`}
+    ${!cells.length && !errs.cells && html`<div className="card"><b>No storm cells within ${CELL_RADIUS_MI} mi</b><div className="dim">NEXRAD storm tracking, refreshed every 2 min</div></div>`}
+    ${cells.slice(0,40).map(c=>html`<div key=${c.id} className="card" onClick=${()=>setModal({type:'cell',c})} style=${{cursor:'pointer',borderColor:c.eta?'#ff9100':'var(--line)'}}>
+      <div className="row"><b>Cell ${c.p.storm_id||''} <span className="dim">(${c.p.nexrad||''})</span></b>
+        <span className="dim">${Math.round(c.dist)} mi ${compass(c.brg)}</span></div>
+      <div style=${{color:c.eta?'#ffab40':'var(--text)',fontWeight:c.eta?700:400}}>${c.status}</div>
+      <div className="dim">${c.toward!=null?`Moving ${compass(c.toward)} at ${Math.round(c.mph)} mph`:''}${c.p.max_dbz?` · ${c.p.max_dbz} dBZ`:''}${c.p.top?` · tops ${c.p.top} kft`:''}</div>
+      <div>${c.flags.map(f=>html`<span key=${f.t} className="pill" style=${{background:f.c,color:'#000'}}>${f.t}</span>`)}</div>
+    </div>`)}
+  </div>`;
+
+  const NowTab=()=>{
+    const o=obs; return html`<div>
+    ${errs.forecast && html`<div className="err">Forecast: ${errs.forecast}</div>`}
+    ${o && html`<div className="card">
+      <div className="row"><div><div className="big">${cToF(o.temperature?.value)??'--'}°</div><div>${o.textDescription||''}</div></div>
+        <div className="dim" style=${{textAlign:'right'}}>${o.stationName}<br/>${o.timestamp?fmtTime(o.timestamp):''}</div></div>
+      <div className="grid">
+        <div>Feels like: <b>${cToF((o.windChill?.value ?? o.heatIndex?.value ?? o.temperature?.value))??'--'}°</b></div>
+        <div>Dew point: <b>${cToF(o.dewpoint?.value)??'--'}°</b></div>
+        <div>Wind: <b>${o.windDirection?.value!=null?compass(o.windDirection.value):''} ${toMph(o.windSpeed)??'--'} mph</b></div>
+        <div>Gusts: <b>${toMph(o.windGust)??'--'} mph</b></div>
+        <div>Humidity: <b>${o.relativeHumidity?.value!=null?Math.round(o.relativeHumidity.value)+'%':'--'}</b></div>
+        <div>Pressure: <b>${o.barometricPressure?.value?(o.barometricPressure.value/3386.39).toFixed(2)+' inHg':'--'}</b></div>
+        <div>Visibility: <b>${o.visibility?.value!=null?(o.visibility.value/1609.34).toFixed(1)+' mi':'--'}</b></div>
+      </div></div>`}
+    ${hourly.length>0 && html`<div className="card"><b>Next 24 hours</b><div className="hourly" style=${{marginTop:8}}>
+      ${hourly.map(h=>html`<div key=${h.startTime} className="hr"><div className="dim">${fmtHour(h.startTime)}</div><b>${h.temperature}°</b>
+        <div style=${{color:'#4fc3f7'}}>${h.probabilityOfPrecipitation?.value??0}%</div><div className="dim" style=${{fontSize:11}}>${h.shortForecast}</div>
+        <div className="dim" style=${{fontSize:11}}>${h.windDirection} ${h.windSpeed}</div></div>`)}
+    </div></div>`}
+  </div>`;};
+
+  const WeekTab=()=>html`<div className="card">
+    ${errs.forecast && html`<div className="err">Forecast: ${errs.forecast}</div>`}
+    ${daily.map(d=>html`<div key=${d.number} className="day" onClick=${()=>setModal({type:'day',d})}>
+      <b>${d.name}</b><div className="dim">${d.shortForecast}${d.probabilityOfPrecipitation?.value?` · ${d.probabilityOfPrecipitation.value}%`:''}</div>
+      <b style=${{color:d.isDaytime?'#ffab40':'#4fc3f7'}}>${d.temperature}°</b></div>`)}
+  </div>`;
+
+  const SpcTab=()=>{
+    const r=spc && spc.code && RISK[spc.code];
+    return html`<div className="card">
+      <b>SPC Day 1 Convective Outlook</b><div className="dim" style=${{marginBottom:10}}>Risk at Decatur</div>
+      ${errs.spc && html`<div className="err">SPC: ${errs.spc}</div>`}
+      ${spc && html`<div>
+        <div className="risk" style=${{background:r?r[1]:'#263241',color:r?r[2]:'#e6edf3'}}>${r?r[0]:'No thunderstorm risk'}</div>
+        ${spc.tor!==undefined && html`<div className="grid">
+          <div>Tornado: <b>${spc.tor}</b></div><div>Hail: <b>${spc.hail}</b></div><div>Wind: <b>${spc.wind}</b></div></div>`}
+        ${spc.issue && html`<div className="dim" style=${{marginTop:8}}>Issued ${String(spc.issue)}</div>`}
+      </div>`}
+      <div style=${{marginTop:10}}><a href="https://www.spc.noaa.gov/products/outlook/day1otlk.html" target="_blank" rel="noopener">Full SPC outlook ↗</a></div>
+    </div>`;};
+
+  const Modal=()=>{ if(!modal) return null; let body=null;
+    if(modal.type==='alert'){ const p=modal.a.properties; body=html`<div>
+      <h2 style=${{margin:'0 0 4px',color:alertColor(modal.a)}}>${p.event}</h2>
+      <div className="dim">${p.severity} · ${p.certainty} · ${p.urgency}</div>
+      <div className="dim">Issued ${fmtTime(p.sent)} · Until ${fmtTime(p.ends||p.expires)}</div>
+      <p><b>${p.headline}</b></p><div className="dim">${p.areaDesc}</div>
+      <pre>${p.description||''}</pre>${p.instruction && html`<h3>What to do</h3><pre>${p.instruction}</pre>`}</div>`; }
+    if(modal.type==='cell'){ const c=modal.c, p=c.p; body=html`<div>
+      <h2 style=${{margin:'0 0 6px'}}>Storm cell ${p.storm_id||''} <span className="dim">${p.nexrad||''}</span></h2>
+      <p style=${{fontWeight:700,color:c.eta?'#ffab40':'inherit'}}>${c.status}</p>
+      <div className="grid">
+        <div>Distance: <b>${Math.round(c.dist)} mi ${compass(c.brg)}</b></div>
+        <div>Motion: <b>${c.toward!=null?compass(c.toward)+' '+Math.round(c.mph)+' mph':'--'}</b></div>
+        <div>Max dBZ: <b>${p.max_dbz??'--'}</b></div><div>VIL: <b>${p.vil??'--'}</b></div>
+        <div>Tops: <b>${p.top??'--'} kft</b></div><div>Hail prob: <b>${p.poh??'--'}%</b></div>
+        <div>Severe hail: <b>${p.posh??'--'}%</b></div><div>Max hail: <b>${p.max_size??'--'}"</b></div>
+        <div>Mesocyclone: <b>${flagOn(p.meso)?p.meso:'None'}</b></div><div>TVS: <b>${flagOn(p.tvs)?p.tvs:'None'}</b></div>
+      </div>
+      <div className="dim" style=${{marginTop:8}}>Scan ${p.valid?fmtTime(p.valid):''}. ETA assumes the cell holds its current track and speed.</div></div>`; }
+    if(modal.type==='day'){ body=html`<div><h2 style=${{margin:'0 0 6px'}}>${modal.d.name}</h2><p>${modal.d.detailedForecast}</p></div>`; }
+    return html`<div className="modal" onClick=${()=>setModal(null)}><div className="sheet" onClick=${e=>e.stopPropagation()}>
+      <div style=${{textAlign:'right'}}><button onClick=${()=>setModal(null)}>Close</button></div>${body}</div></div>`; };
+
+  const tabs=[['alerts','Alerts',alerts.length],['cells','Storm Cells',incoming.length],['now','Now & Hourly'],['week','7-Day'],['spc','SPC Outlook']];
+  return html`<div>
+    <${Banner}/>
+    <header>
+      <h1>⛈ Decatur Storm Tracker</h1>
+      <div className="meta">${updated?'Updated '+fmtTime(updated):'Loading…'}<br/>Refresh in ${Math.floor(secsLeft/60)}:${String(secsLeft%60).padStart(2,'0')}
+        <button style=${{marginLeft:6,padding:'2px 8px'}} onClick=${refreshAll}>↻</button>
+        <button style=${{marginLeft:4,padding:'2px 8px'}} onClick=${toggleSound} title="Alarm sound for new warnings">${sound?'🔔':'🔕'}</button></div>
+    </header>
+    <div ref=${mapEl} id="map"></div>
+    <div className="radarbar">
+      <button onClick=${()=>setPlaying(p=>!p)}>${playing?'❚❚ Pause':'▶ Play'}</button>
+      <input type="range" min="0" max=${FRAMES.length-1} value=${frame} onInput=${e=>{setPlaying(false);setFrame(+e.target.value);}}/>
+      <span className="t">${frameTime?fmtTime(frameTime):'--'}${FRAMES[frame]===0?' (latest)':''}</span>
+    </div>
+    <div className="legend">${['#04e9e7','#019ff4','#0300f4','#02fd02','#01c501','#008e00','#fdf802','#e5bc00','#fd9500','#fd0000','#d40000','#bc0000','#f800fd','#9854c6'].map(c=>html`<div key=${c} style=${{flex:1,background:c}}></div>`)}</div>
+    <nav className="tabs">${tabs.map(([k,l,n])=>html`<button key=${k} className=${tab===k?'on':''} onClick=${()=>setTab(k)}>${l}${n?html`<span className="count">${n}</span>`:''}</button>`)}</nav>
+    <main>
+      ${tab==='alerts' && html`<${AlertsTab}/>`}
+      ${tab==='cells' && html`<${CellsTab}/>`}
+      ${tab==='now' && html`<${NowTab}/>`}
+      ${tab==='week' && html`<${WeekTab}/>`}
+      ${tab==='spc' && html`<${SpcTab}/>`}
+      <div className="dim" style=${{marginTop:16,fontSize:12}}>Data: NWS api.weather.gov, Iowa Environmental Mesonet (NEXRAD), NOAA/SPC. Not an official warning source. Keep a weather radio or phone alerts on.</div>
+    </main>
+    <${Modal}/>
+  </div>`;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(html`<${App}/>`);
+</script>
+</body>
+</html>
