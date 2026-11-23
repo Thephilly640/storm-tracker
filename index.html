@@ -162,10 +162,13 @@ function App(){
   const [now,setNow]=useState(Date.now());
   const [frame,setFrame]=useState(FRAMES.length-1);
   const [playing,setPlaying]=useState(true);
+  const [live,setLive]=useState(false);
   const [radarBase,setRadarBase]=useState(null);
   const [modal,setModal]=useState(null);
+  const liveRef=useRef(false);
   const [sound,setSound]=useState(false);
 
+  useEffect(()=>{ liveRef.current=live; },[live]);
   const setErr=(k,v)=>setErrs(e=>({...e,[k]:v}));
 
   // map init
@@ -329,6 +332,7 @@ function App(){
   const refreshAll=useCallback(()=>{
     const t=Date.now();
     radarRef.current.forEach((l,i)=>l.setUrl(radarUrl(FRAMES[i],t)));
+    if(liveRef.current) setFrame(FRAMES.length-1);
     Promise.allSettled([loadAlerts(),loadForecast(),loadCells(),loadSpc(),loadRadarTime()]).then(()=>setUpdated(Date.now()));
     setNextAt(Date.now()+REFRESH_MS);
   },[]);
@@ -462,8 +466,10 @@ function App(){
     </header>
     <div ref=${mapEl} id="map"></div>
     <div className="radarbar">
-      <button onClick=${()=>setPlaying(p=>!p)}>${playing?'❚❚ Pause':'▶ Play'}</button>
-      <input type="range" min="0" max=${FRAMES.length-1} value=${frame} onInput=${e=>{setPlaying(false);setFrame(+e.target.value);}}/>
+      <button onClick=${()=>{setLive(false);setPlaying(p=>!p);}}>${playing?'❚❚ Pause':'▶ Play'}</button>
+      <button onClick=${()=>{ if(live){setLive(false);} else {setLive(true);setPlaying(false);setFrame(FRAMES.length-1);} }}
+        style=${live?{background:'#ff1744',borderColor:'#ff1744',color:'#fff',fontWeight:700}:{}}>${live?'● LIVE':'○ Live'}</button>
+      <input type="range" min="0" max=${FRAMES.length-1} value=${frame} onInput=${e=>{setLive(false);setPlaying(false);setFrame(+e.target.value);}}/>
       <span className="t">${frameTime?fmtTime(frameTime):'--'}${FRAMES[frame]===0?' (latest)':''}</span>
     </div>
     <div className="legend">${['#04e9e7','#019ff4','#0300f4','#02fd02','#01c501','#008e00','#fdf802','#e5bc00','#fd9500','#fd0000','#d40000','#bc0000','#f800fd','#9854c6'].map(c=>html`<div key=${c} style=${{flex:1,background:c}}></div>`)}</div>
