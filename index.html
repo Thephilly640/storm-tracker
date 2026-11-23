@@ -54,6 +54,7 @@
   .modal pre{white-space:pre-wrap;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace;background:var(--bg);padding:10px;border-radius:8px}
   .err{color:#ff8a80;font-size:12px}
   .leaflet-container{background:#000;font:inherit}
+  .leaflet-control-layers{background:var(--card);color:var(--text);border:1px solid var(--line)!important}
   .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--card);color:var(--text)}
   .legend{display:flex;height:8px;border-radius:4px;overflow:hidden;margin:0 14px 8px;opacity:.85}
   a{color:var(--accent)}
@@ -173,10 +174,23 @@ function App(){
     mapRef.current=map;
     map.createPane('radar').style.zIndex=350;
     map.createPane('labels').style.zIndex=450; map.getPane('labels').style.pointerEvents='none';
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-      {attribution:'&copy; OpenStreetMap &copy; CARTO | Radar: Iowa Environmental Mesonet | Data: NWS, SPC',maxZoom:12}).addTo(map);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png',{pane:'labels',maxZoom:12}).addTo(map);
-    radarRef.current=FRAMES.map(m=>L.tileLayer(radarUrl(m,Date.now()),{pane:'radar',opacity:0,maxZoom:12,maxNativeZoom:10}).addTo(map));
+    const attr='&copy; OpenStreetMap &copy; CARTO | Radar: Iowa Environmental Mesonet | Data: NWS, SPC';
+    const bases={
+      'Streets (dark)': L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{attribution:attr,maxZoom:14}),
+      'Streets (light)': L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',{attribution:attr,maxZoom:14}),
+      'Satellite': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{attribution:'Imagery &copy; Esri | Radar: IEM | Data: NWS, SPC',maxZoom:14})
+    };
+    bases['Streets (dark)'].addTo(map);
+    const labels=L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png',{pane:'labels',maxZoom:14,opacity:.9});
+    const counties=L.tileLayer('https://mesonet.agron.iastate.edu/c/tile.py/1.0.0/uscounties/{z}/{x}/{y}.png',{pane:'labels',opacity:.6,maxZoom:14});
+    counties.addTo(map);
+    L.control.layers(bases,{'County lines':counties,'Town labels on top':labels},{position:'topright'}).addTo(map);
+    map.on('baselayerchange',e=>{ if(e.name==='Satellite') labels.addTo(map); });
+    // Adams County outline
+    getJSON('https://api.weather.gov/zones/county/'+COUNTY_ZONE,true).then(z=>{
+      if(z.geometry) L.geoJSON(z.geometry,{style:{color:'#ffffff',weight:2,opacity:.8,fill:false},interactive:false,pane:'labels'}).addTo(map);
+    }).catch(()=>{});
+    radarRef.current=FRAMES.map(m=>L.tileLayer(radarUrl(m,Date.now()),{pane:'radar',opacity:0,maxZoom:14,maxNativeZoom:10}).addTo(map));
     alertLayer.current=L.layerGroup().addTo(map);
     cellLayer.current=L.layerGroup().addTo(map);
     L.circleMarker([LAT,LON],{radius:7,color:'#fff',weight:2,fillColor:'#4fc3f7',fillOpacity:1}).bindPopup('Decatur, IN 46733').addTo(map);
